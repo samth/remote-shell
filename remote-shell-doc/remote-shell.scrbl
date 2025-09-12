@@ -4,6 +4,7 @@
                      racket/string
                      remote-shell/ssh
                      remote-shell/vbox
+                     remote-shell/docker
                      racket/tcp
                      racket/system))
 
@@ -294,11 +295,18 @@ not be running.}
 Starts the Docker container @racket[name], which must exist and must
 not be running.}
 
-@defproc[(docker-stop [#:name name string?])
+@defproc[(docker-stop [#:name name string?]
+                      [#:wait? wait? #t])
          void?]{
 
 Stops the Docker container @racket[name], which must exist and must be
-running.}
+running.
+
+If @racket[wait?] is true, then @racket[docker-stop] returns only
+after @racket[docker-running?] returns @racket[#f], since a container
+may stay in the running state for some time after requesting a stop.
+
+@history[#:changed "1.9" @elem{Added @racket[#:wait?].}]}
 
 @defproc[(docker-exec [#:name name string?]
                       [command path-string?]

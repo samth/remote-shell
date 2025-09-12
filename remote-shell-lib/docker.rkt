@@ -219,9 +219,15 @@
   (unless (with-no-stdout (system* docker "container" "start" name))
     (failed who "start failed" name)))
 
-(define/who (docker-stop #:name name)
+(define/who (docker-stop #:name name
+                         #:wait? [wait? #t])
   (unless (with-no-stdout (system* docker "container" "stop" name))
-    (failed who "stop failed" name)))
+    (failed who "stop failed" name))
+  (when wait?
+    (let loop ([delay 0.1])
+      (when (docker-running? #:name name)
+        (sleep delay)
+        (loop (min (* delay 2) 1))))))
 
 (define/who (docker-exec #:name name
                          #:mode [mode 'error]
