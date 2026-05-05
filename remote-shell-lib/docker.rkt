@@ -326,3 +326,8 @@
      (unless ok?
        (error who "copy failed\n  name: ~e\n  src: ~e\n  dest: ~e" name src dest))]
     [else ok?]))
+
+;; Expose the private argv-construction helpers so tests in
+;; remote-shell-test can exercise them without invoking docker.
+(module+ for-testing
+  (provide docker-build-argv docker-exec-argv))
