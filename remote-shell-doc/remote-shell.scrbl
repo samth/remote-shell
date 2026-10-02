@@ -37,7 +37,10 @@ produced by @racket[remote], @racket[#f] otherwise.}
                                                                   (integer-in 1 65535)))
                                    null]
                  [#:key key (or/c #f path-string?) #f]
-                 [#:timeout timeout-secs real? 600])
+                 [#:timeout timeout-secs real? 600]
+                 [#:ssh-options ssh-options
+                  (listof (cons/c (and/c string? #px"^[A-Za-z][A-Za-z0-9]*$")
+                                  string-no-nuls?)) null])
          remote?]{
 
 Creates a representation of a remote host. The @racket[host] argument
@@ -61,12 +64,55 @@ number on the remote host, and the second port number is the port that
 it tunnels to on the local host.
 
 If @racket[key] is not @racket[#f], then it is used as the path to an identity
-file used for public-key authentication for a @racket['ip] host/
+file used for public-key authentication for a @racket['ip] host.
 
-The @racket[timeout] argument specifies a timeout after which a remote
-command will be considered failed.
+The @racket[timeout-secs] argument specifies an overall timeout in seconds
+for @racket[ssh], including connection establishment and command execution.
+It does not set the OpenSSH connection timeout or apply to @racket[scp].
+The @tt{ConnectTimeout} option independently limits connection establishment,
+including the initial SSH protocol handshake and key exchange. It does not
+replace or extend @racket[timeout-secs]: the overall timeout can expire
+while connecting even if @tt{ConnectTimeout} allows more time, and it
+continues to limit command execution after a connection succeeds.
 
-@history[#:changed "1.3" @elem{Added support for Docker containers, the @racket[kind]
+The @racket[ssh-options] argument supplies an ordered list of OpenSSH
+configuration name/value pairs for @racket[ssh] and @racket[scp]. Each pair
+is passed as two separate command-line arguments: @exec{-o} and
+@tt{name=value}, before the destination. Names must start with an ASCII
+letter and contain only ASCII letters and digits; values must be strings
+without nul characters. OpenSSH validates the supported names and values,
+interprets any option-specific syntax, and handles repeated options in the
+supplied order. Values are not shell-quoted or split into command-line
+arguments by this library. The default empty list adds no options, so
+OpenSSH configuration files and host aliases continue to work.
+
+Repeated option names are passed through without rejection or deduplication.
+For most OpenSSH options, the first specified value is used, and these
+command-line options take precedence over values in SSH configuration
+files. For example,
+@racket['(("ConnectTimeout" . "5") ("ConnectTimeout" . "30"))]
+sets a five-second connection timeout. Some options have additive behavior
+instead: multiple @tt{IdentityFile} entries add identities to try, alongside
+the identity supplied by @racket[key]. See the
+@hyperlink["https://man.openbsd.org/ssh_config.5"]{OpenSSH configuration manual}
+for each option's precedence and repetition rules.
+
+For example, this remote disables authentication prompts and sets a
+five-second connection timeout while allowing up to 600 seconds overall:
+
+@racketblock[
+(remote #:host "build-host"
+        #:ssh-options '(("BatchMode" . "yes")
+                        ("ConnectTimeout" . "5"))
+        #:timeout 600)
+]
+
+These options must be @racket['()] for a @racket['docker] host. For the
+local-execution shortcut (@racket[host] is @racket["localhost"] and
+@racket[user] is empty), @racket[ssh-options] are unused by @racket[ssh].
+
+@history[#:changed "1.11" @elem{Added the @racket[#:ssh-options] argument.}
+         #:changed "1.3" @elem{Added support for Docker containers, the @racket[kind]
                                argument, and the @racket[shell] argument.}]}
 
 
@@ -102,6 +148,13 @@ The implementation of the remote command depends on @racket[remote]:
        by @racket[remote] must be started already.}
 
 ]
+
+The command receives input from @racket[current-input-port]. For example,
+a JSON request can be supplied through an input byte-string port while
+@racket[#:mode] @racket['output] captures the response. That mode combines
+standard output and standard error, so a JSON consumer must account for
+any diagnostic output. OpenSSH options such as @tt{StdinNull=yes} can
+change input handling.
 
 If @racket[mode] is @racket['error], then the result is
 @racket[(void)] or an exception is raised if the remote command fails

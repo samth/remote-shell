@@ -17,6 +17,8 @@
                     #:key (or/c #f path-string?)
                     #:env (listof (cons/c string? string?))
                     #:timeout real?
+                    #:ssh-options (listof (cons/c (and/c string? #px"^[A-Za-z][A-Za-z0-9]*$")
+                                                  string-no-nuls?))
                     #:remote-tunnels (listof (cons/c (integer-in 1 65535)
                                                      (integer-in 1 65535))))
                    . ->* . remote?))
@@ -40,7 +42,7 @@
 
           [remote-host (remote? . -> . string?)]))
 
-(struct remote (host kind user shell timeout remote-tunnels env key)
+(struct remote (host kind user shell timeout remote-tunnels env key ssh-options)
   #:constructor-name make-remote)
 
 (define create-remote
@@ -52,11 +54,15 @@
                     #:key [key #f]
                     #:timeout [timeout 600]
                     #:remote-tunnels [remote-tunnels null]
-                    #:env [env null])
+                    #:env [env null]
+                    #:ssh-options [ssh-options null])
       (when (and (eq? kind 'docker)
                  (pair? remote-tunnels))
         (raise-arguments-error 'remote "tunnels are not supported for a 'docker remote"))
-      (make-remote host kind user shell timeout remote-tunnels env key))
+      (when (and (eq? kind 'docker)
+                 (pair? ssh-options))
+        (raise-arguments-error 'remote "SSH options are not supported for a 'docker remote"))
+      (make-remote host kind user shell timeout remote-tunnels env key ssh-options))
     remote))
 
 (define scp-exe (find-executable-path "scp"))
@@ -66,6 +72,11 @@
   (if (not (equal? (remote-user remote) ""))
       (~a (remote-user remote) "@" (remote-host remote))
       (remote-host remote)))
+
+(define (remote-ssh-option-args remote)
+  (apply append
+         (for/list ([option (in-list (remote-ssh-options remote))])
+           (list "-o" (~a (car option) "=" (cdr option))))))
 
 (define (at-remote remote path)
   (~a (remote-user+host remote) ":" path))
@@ -115,7 +126,6 @@
   (define timeout? #f)
   (define orig-thread (current-thread))
   (define timeout (remote-timeout remote))
-  (define key (remote-key remote))
   (define ssh-custodian (make-custodian))
   (define timeout-thread
     (parameterize ([current-custodian ssh-custodian])
@@ -158,13 +168,14 @@
             [else
              (apply system*/show ssh-exe
                     (append
+                     (remote-ssh-option-args remote)
+                     (if (remote-key remote) (list "-i" (remote-key remote)) null)
                      ;; create tunnels to connect back to server:
                      (apply
                       append
                       (for/list ([tunnel (in-list (remote-remote-tunnels remote))])
                         (list "-R" (~a (car tunnel) ":localhost:" (cdr tunnel)))))
                      (list (remote-user+host remote))
-                     (if key (list "-i" key) null)
                      ;; ssh needs an extra level of quoting
                      ;;  relative to sh:
                      (for/list ([arg (in-list cmd)])
@@ -199,7 +210,9 @@
                     #:dest dest
                     #:mode 'result)]
       [(ip)
-       (apply system*/show scp-exe (append (if key (list "-i" key) null) (list src dest)))]))
+       (apply system*/show scp-exe (append (remote-ssh-option-args remote)
+                                        (if key (list "-i" key) null)
+                                        (list src dest)))]))
   (case mode
     [(result) ok?]
     [else 
